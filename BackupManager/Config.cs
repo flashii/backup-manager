@@ -1,0 +1,25 @@
+﻿namespace BackupManager
+{
+    public class Config
+    {
+        public string GoogleClientId { get; set; }
+        public string GoogleClientSecret { get; set; }
+        public string GoogleBackupDirectory { get; set; } = @"Backups";
+
+        // these should not be edited in the xml file
+        public string GoogleAccessToken { get; set; }
+        public string GoogleTokenType { get; set; }
+        public long? GoogleTokenExpires { get; set; }
+        public string GoogleRefreshToken { get; set; }
+        public string GoogleTokenIssued { get; set; }
+
+        public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe";
+        public string MySqlDumpPath { get; set; } = @"mysqldump";
+        public string MySqlHost { get; set; } = @"localhost";
+        public string MySqlUser { get; set; }
+        public string MySqlPass { get; set; }
+        public string MySqlDatabases { get; set; } = @"misuzu";
+
+        public string MisuzuPath { get; set; }
+    }
+}
