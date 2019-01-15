@@ -3,14 +3,17 @@ using Google.Apis.Drive.v3;
 using Google.Apis.Services;
 using Renci.SshNet;
 using Renci.SshNet.Common;
-using Renci.SshNet.Sftp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Xml;
 using System.Xml.Serialization;
@@ -107,7 +110,7 @@ namespace BackupManager
             }
 
             LoadConfig();
-
+            
             switch (Config.StorageMethod)
             {
                 case StorageMethod.GoogleDrive:
@@ -249,6 +252,9 @@ namespace BackupManager
             }
 
             Console.WriteLine(line);
+
+            if (!(Config?.SatoriErrorsOnly ?? true))
+                SatoriBroadcast(line.ToString());
         }
 
         public static void Error(object line, int exit = 0x00DEAD00)
@@ -259,6 +265,8 @@ namespace BackupManager
                 Log(line);
                 Console.ResetColor();
             }
+
+            SatoriBroadcast(line.ToString(), true);
 
 #if DEBUG
             Console.ReadLine();
@@ -466,6 +474,75 @@ namespace BackupManager
                         SFTP.CreateDirectory(directory);
                     }
                     break;
+            }
+        }
+
+        public static void SatoriBroadcast(string text, bool error = false)
+        {
+            if (string.IsNullOrEmpty(text)
+                || Config == null
+                || string.IsNullOrWhiteSpace(Config.SatoriHost)
+                || string.IsNullOrWhiteSpace(Config.SatoriSecret)
+                || Config.SatoriPort < 1)
+                return;
+
+            IPAddress ip = null;
+
+            try
+            {
+                ip = IPAddress.Parse(Config.SatoriHost);
+            }
+            catch
+            {
+                try
+                {
+                    ip = Dns.GetHostAddresses(Config.SatoriHost).FirstOrDefault();
+                }
+                catch
+                {
+                    ip = null;
+                }
+            }
+
+            if (ip == null)
+                return;
+
+            EndPoint endPoint = new IPEndPoint(ip, Config.SatoriPort);
+
+            StringBuilder textBuilder = new StringBuilder();
+            textBuilder.Append(@"[b]Backup System[/b]: ");
+
+            if (error)
+                textBuilder.Append(@"[color=red]");
+
+            textBuilder.Append(text);
+
+            if (error)
+                textBuilder.Append(@"[/color]");
+
+            text = textBuilder.ToString();
+
+            StringBuilder messageBuilder = new StringBuilder();
+
+            using (HMACSHA256 hmac = new HMACSHA256(Encoding.UTF8.GetBytes(Config.SatoriSecret)))
+            {
+                byte[] hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(text));
+
+                foreach (byte b in hash)
+                    messageBuilder.AppendFormat(@"{0:x2}", b);
+            }
+
+            messageBuilder.Append(text);
+            string message = messageBuilder.ToString();
+            byte[] messageBytes = new byte[Encoding.UTF8.GetByteCount(message) + 2];
+            messageBytes[0] = messageBytes[messageBytes.Length - 1] = 0x0F;
+            Encoding.UTF8.GetBytes(message).CopyTo(messageBytes, 1);
+
+            using (Socket sock = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp))
+            {
+                sock.NoDelay = sock.Blocking = true;
+                sock.Connect(endPoint);
+                sock.Send(messageBytes);
             }
         }
     }

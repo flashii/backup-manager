@@ -31,5 +31,10 @@
         public string MySqlDatabases { get; set; } = @"misuzu";
 
         public string MisuzuPath { get; set; }
+
+        public string SatoriHost { get; set; }
+        public ushort SatoriPort { get; set; }
+        public string SatoriSecret { get; set; }
+        public bool SatoriErrorsOnly { get; set; } = true;
     }
 }
