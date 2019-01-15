@@ -1,6 +1,9 @@
 ﻿using Google.Apis.Auth.OAuth2;
 using Google.Apis.Drive.v3;
 using Google.Apis.Services;
+using Renci.SshNet;
+using Renci.SshNet.Common;
+using Renci.SshNet.Sftp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -42,7 +45,9 @@ namespace BackupManager
         );
 
         private static DriveService DriveService;
-        private static GFile BackupStorage;
+        private static object BackupStorage;
+
+        private static SftpClient SFTP;
 
         public static bool Headless;
 
@@ -103,19 +108,69 @@ namespace BackupManager
 
             LoadConfig();
 
-            UserCredential uc = GoogleAuthenticate(
-                new ClientSecrets
-                {
-                    ClientId = Config.GoogleClientId,
-                    ClientSecret = Config.GoogleClientSecret,
-                },
-                new[] {
-                    DriveService.Scope.Drive,
-                    DriveService.Scope.DriveFile,
-                }
-            );
+            switch (Config.StorageMethod)
+            {
+                case StorageMethod.GoogleDrive:
+                    UserCredential uc = GoogleAuthenticate(
+                        new ClientSecrets
+                        {
+                            ClientId = Config.GoogleClientId,
+                            ClientSecret = Config.GoogleClientSecret,
+                        },
+                        new[] {
+                            DriveService.Scope.Drive,
+                            DriveService.Scope.DriveFile,
+                        }
+                    );
 
-            CreateDriveService(uc);
+                    CreateDriveService(uc);
+                    break;
+
+                case StorageMethod.Sftp:
+                    if (string.IsNullOrWhiteSpace(Config.SftpHost) || string.IsNullOrWhiteSpace(Config.SftpUsername))
+                    {
+                        sw.Stop();
+                        Config.SftpHost = Config.SftpHost ?? @"";
+                        Config.SftpPort = Config.SftpPort < 1 ? (ushort)22 : Config.SftpPort;
+                        Config.SftpUsername = Config.SftpUsername ?? @"";
+                        Config.SftpPassphrase = Config.SftpPassphrase ?? @"";
+                        Config.SftpPrivateKey = Config.SftpPrivateKey ?? @"";
+                        Config.SftpTrustedHost = Config.SftpTrustedHost ?? @"";
+                        Config.SftpBackupDirectoryPath = Config.SftpBackupDirectoryPath ?? @"";
+                        SaveConfig();
+                        Error(@"No Sftp host/auth details found in the configuration.");
+                    }
+
+                    if (!string.IsNullOrEmpty(Config.SftpPrivateKey))
+                        SFTP = new SftpClient(Config.SftpHost, Config.SftpPort, Config.SftpUsername, new PrivateKeyFile(Config.SftpPrivateKey, Config.SftpPassphrase ?? string.Empty));
+                    else
+                        SFTP = new SftpClient(Config.SftpHost, Config.SftpPort, Config.SftpUsername, Config.SftpPassphrase ?? string.Empty);
+
+                    using (ManualResetEvent mre = new ManualResetEvent(false))
+                    {
+                        if (!string.IsNullOrWhiteSpace(Config.SftpTrustedHost))
+                            SFTP.HostKeyReceived += (s, e) =>
+                            {
+                                string checkString = e.HostKeyName + @"#" + Convert.ToBase64String(e.HostKey) + @"#" + Convert.ToBase64String(e.FingerPrint);
+                                e.CanTrust = Config.SftpTrustedHost.SequenceEqual(checkString);
+                                mre.Set();
+                            };
+                        else
+                            mre.Set();
+
+                        try
+                        {
+                            SFTP.Connect();
+                        } catch (SshConnectionException)
+                        {
+                            Error(@"Error during SFTP connect, it's possible the server key changed.");
+                        }
+
+                        mre.WaitOne();
+                    }
+                    break;
+            }
+
             GetBackupStorage();
 
             Log(@"Database backup...");
@@ -123,8 +178,18 @@ namespace BackupManager
             using (Stream s = CreateMySqlDump())
             using (Stream g = GZipEncodeStream(s))
             {
-                GFile f = Upload(DatabaseDumpName, @"application/sql+gzip", g);
-                Log($@"MySQL dump uploaded: {f.Name} ({f.Id})");
+                object f = Upload(DatabaseDumpName, @"application/sql+gzip", g);
+
+                switch (f)
+                {
+                    case GFile fgf:
+                        Log($@"MySQL dump uploaded: {fgf.Name} ({fgf.Id})");
+                        break;
+
+                    default:
+                        Log($@"MySQL dump uploaded.");
+                        break;
+                }
             }
 
             if (Directory.Exists(Config.MisuzuPath))
@@ -144,8 +209,18 @@ namespace BackupManager
 
                 using (FileStream fs = File.OpenRead(archivePath))
                 {
-                    GFile f = Upload(UserDataName, @"application/zip", fs);
-                    Log($@"Misuzu data uploaded: {f.Name} ({f.Id})");
+                    object f = Upload(UserDataName, @"application/zip", fs);
+
+                    switch (f)
+                    {
+                        case GFile fgf:
+                            Log($@"Misuzu data uploaded: {fgf.Name} ({fgf.Id})");
+                            break;
+
+                        default:
+                            Log($@"Misuzu data uploaded.");
+                            break;
+                    }
                 }
 
                 File.Delete(archivePath);
@@ -185,22 +260,37 @@ namespace BackupManager
                 Console.ResetColor();
             }
 
+#if DEBUG
+            Console.ReadLine();
+#endif
+
             Environment.Exit(exit);
         }
         
-        public static GFile Upload(string name, string type, Stream stream)
+        public static object Upload(string name, string type, Stream stream)
         {
             Log($@"Uploading '{name}'...");
-            FilesResource.CreateMediaUpload request = DriveService.Files.Create(new GFile
+
+            switch (BackupStorage)
             {
-                Name = name,
-                Parents = new List<string> {
-                    BackupStorage.Id,
-                },
-            }, stream, type);
-            request.Fields = @"id, name";
-            request.Upload();
-            return request.ResponseBody;
+                case GFile gfile:
+                    FilesResource.CreateMediaUpload request = DriveService.Files.Create(new GFile
+                    {
+                        Name = name,
+                        Parents = new List<string> {
+                            gfile.Id,
+                        },
+                    }, stream, type);
+                    request.Fields = @"id, name";
+                    request.Upload();
+                    return request.ResponseBody;
+
+                case string scpName:
+                    SFTP.UploadFile(stream, scpName + @"/" + name);
+                    break;
+            }
+
+            return null;
         }
 
         public static string GetMisuzuConfig()
@@ -278,7 +368,7 @@ namespace BackupManager
                 sw.WriteLine(@"default-character-set=utf8");
             }
 
-            ProcessStartInfo psi = new ProcessStartInfo
+            Process p = Process.Start(new ProcessStartInfo
             {
                 FileName = IsWindows ? Config.MySqlDumpPathWindows : Config.MySqlDumpPath,
                 RedirectStandardError = false,
@@ -287,8 +377,7 @@ namespace BackupManager
                 Arguments = $@"--defaults-file={tmpFile} --add-locks -l --order-by-primary -B {Config.MySqlDatabases}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
-            };
-            Process p = Process.Start(psi);
+            });
 
             int read;
             byte[] buffer = new byte[1024];
@@ -341,27 +430,43 @@ namespace BackupManager
 
         public static void GetBackupStorage(string name = null)
         {
-            name = name ?? Config.GoogleBackupDirectory;
-            Log(@"Getting backup folder...");
-            FilesResource.ListRequest lr = DriveService.Files.List();
-            lr.Q = $@"name = '{name}' and mimeType = '{FOLDER_MIME}'";
-            lr.PageSize = 1;
-            lr.Fields = @"files(id)";
-            GFile backupFolder = lr.Execute().Files.FirstOrDefault();
-
-            if (backupFolder == null)
+            switch (Config.StorageMethod)
             {
-                Log(@"Backup folder doesn't exist yet, creating it...");
-                FilesResource.CreateRequest dcr = DriveService.Files.Create(new GFile
-                {
-                    Name = name,
-                    MimeType = FOLDER_MIME,
-                });
-                dcr.Fields = @"id";
-                backupFolder = dcr.Execute();
-            }
+                case StorageMethod.GoogleDrive:
+                    name = name ?? Config.GoogleBackupDirectory;
+                    Log(@"Getting backup folder...");
+                    FilesResource.ListRequest lr = DriveService.Files.List();
+                    lr.Q = $@"name = '{name}' and mimeType = '{FOLDER_MIME}'";
+                    lr.PageSize = 1;
+                    lr.Fields = @"files(id)";
+                    GFile backupFolder = lr.Execute().Files.FirstOrDefault();
 
-            BackupStorage = backupFolder;
+                    if (backupFolder == null)
+                    {
+                        Log(@"Backup folder doesn't exist yet, creating it...");
+                        FilesResource.CreateRequest dcr = DriveService.Files.Create(new GFile
+                        {
+                            Name = name,
+                            MimeType = FOLDER_MIME,
+                        });
+                        dcr.Fields = @"id";
+                        backupFolder = dcr.Execute();
+                    }
+
+                    BackupStorage = backupFolder;
+                    break;
+
+                case StorageMethod.Sftp:
+                    string directory = (BackupStorage = name ?? Config.SftpBackupDirectoryPath) as string;
+                    try
+                    {
+                        SFTP.ListDirectory(directory);
+                    } catch (SftpPathNotFoundException)
+                    {
+                        SFTP.CreateDirectory(directory);
+                    }
+                    break;
+            }
         }
     }
 }

@@ -2,6 +2,8 @@
 {
     public class Config
     {
+        public StorageMethod StorageMethod { get; set; } = StorageMethod.GoogleDrive;
+
         public string GoogleClientId { get; set; }
         public string GoogleClientSecret { get; set; }
         public string GoogleBackupDirectory { get; set; } = @"Backups";
@@ -12,6 +14,14 @@
         public long? GoogleTokenExpires { get; set; }
         public string GoogleRefreshToken { get; set; }
         public string GoogleTokenIssued { get; set; }
+
+        public string SftpHost { get; set; }
+        public ushort SftpPort { get; set; }
+        public string SftpUsername { get; set; }
+        public string SftpPassphrase { get; set; }
+        public string SftpPrivateKey { get; set; }
+        public string SftpBackupDirectoryPath { get; set; }
+        public string SftpTrustedHost { get; set; }
 
         public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe";
         public string MySqlDumpPath { get; set; } = @"mysqldump";
