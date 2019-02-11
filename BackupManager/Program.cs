@@ -213,20 +213,20 @@ namespace BackupManager
 
         public static void Log(object line, bool forceSatori = false)
         {
-            if (Headless)
-                return;
-
-            if (sw?.IsRunning == true)
+            if (!Headless)
             {
-                ConsoleColor fg = Console.ForegroundColor;
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.Write(sw.ElapsedMilliseconds.ToString().PadRight(10));
-                Console.ForegroundColor = fg;
+                if (sw?.IsRunning == true)
+                {
+                    ConsoleColor fg = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.Write(sw.ElapsedMilliseconds.ToString().PadRight(10));
+                    Console.ForegroundColor = fg;
+                }
+
+                Console.WriteLine(line);
             }
 
-            Console.WriteLine(line);
-
-            if (forceSatori || !(Config?.SatoriErrorsOnly ?? true))
+            if (forceSatori || (!Headless && !(Config?.SatoriErrorsOnly ?? true)))
                 SatoriBroadcast(line.ToString());
         }
 
