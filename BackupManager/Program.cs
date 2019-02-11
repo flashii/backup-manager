@@ -204,14 +204,14 @@ namespace BackupManager
 
             SaveConfig();
             sw.Stop();
-            Log($@"Done! Took {sw.Elapsed}.");
+            Log($@"Done! Took {sw.Elapsed}.", true);
 
 #if DEBUG
             Console.ReadLine();
 #endif
         }
 
-        public static void Log(object line)
+        public static void Log(object line, bool forceSatori = false)
         {
             if (Headless)
                 return;
@@ -226,7 +226,7 @@ namespace BackupManager
 
             Console.WriteLine(line);
 
-            if (!(Config?.SatoriErrorsOnly ?? true))
+            if (forceSatori || !(Config?.SatoriErrorsOnly ?? true))
                 SatoriBroadcast(line.ToString());
         }
 
