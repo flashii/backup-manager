@@ -148,6 +148,11 @@ namespace BackupManager
                         mre.WaitOne();
                     }
                     break;
+
+                case StorageMethod.FileSystem:
+                    if (!Directory.Exists(Config.FileSystemPath))
+                        Directory.CreateDirectory(Config.FileSystemPath);
+                    break;
             }
 
             GetBackupStorage();
@@ -247,10 +252,17 @@ namespace BackupManager
         {
             Log($@"Uploading '{name}'...");
 
-            switch (BackupStorage)
+            switch (Config.StorageMethod)
             {
-                case string scpName:
-                    SFTP.UploadFile(stream, scpName + @"/" + name);
+                case StorageMethod.Sftp:
+                    SFTP.UploadFile(stream, (BackupStorage as string) + @"/" + name);
+                    break;
+
+                case StorageMethod.FileSystem:
+                    string filename = Path.Combine(BackupStorage as string, name);
+
+                    using (FileStream fs = File.OpenWrite(filename))
+                        stream.CopyTo(fs);
                     break;
             }
 
@@ -329,8 +341,18 @@ namespace BackupManager
                 sw.WriteLine(@"[client]");
                 sw.WriteLine($@"user={Config.MySqlUser}");
                 sw.WriteLine($@"password={Config.MySqlPass}");
-                sw.WriteLine(@"default-character-set=utf8");
+                sw.WriteLine(@"default-character-set=utf8mb4");
             }
+
+            // should we use --result-file ?
+            StringBuilder mysqldumpArgs = new StringBuilder();
+            mysqldumpArgs.AppendFormat(@"--defaults-file={0} ", tmpFile);
+            mysqldumpArgs.Append(@"--single-transaction ");
+            mysqldumpArgs.Append(@"--tz-utc --triggers ");
+            mysqldumpArgs.Append(@"--routines --hex-blob ");
+            mysqldumpArgs.Append(@"--add-locks --order-by-primary ");
+            mysqldumpArgs.Append(@"-l -Q -q -B "); // lock, quote names, quick, databases list
+            mysqldumpArgs.Append(Config.MySqlDatabases);
 
             Process p = Process.Start(new ProcessStartInfo
             {
@@ -338,7 +360,7 @@ namespace BackupManager
                 RedirectStandardError = false,
                 RedirectStandardInput = false,
                 RedirectStandardOutput = true,
-                Arguments = $@"--defaults-file={tmpFile} --add-locks -l --order-by-primary -B {Config.MySqlDatabases}",
+                Arguments = mysqldumpArgs.ToString(),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });
@@ -382,6 +404,10 @@ namespace BackupManager
                     {
                         SFTP.CreateDirectory(directory);
                     }
+                    break;
+
+                case StorageMethod.FileSystem:
+                    BackupStorage = name ?? Config.FileSystemPath;
                     break;
             }
         }

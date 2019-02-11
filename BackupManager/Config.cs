@@ -2,19 +2,8 @@
 {
     public class Config
     {
-        public StorageMethod StorageMethod { get; set; } = StorageMethod.GoogleDrive;
-
-        public string GoogleClientId { get; set; }
-        public string GoogleClientSecret { get; set; }
-        public string GoogleBackupDirectory { get; set; } = @"Backups";
-
-        // these should not be edited in the xml file
-        public string GoogleAccessToken { get; set; }
-        public string GoogleTokenType { get; set; }
-        public long? GoogleTokenExpires { get; set; }
-        public string GoogleRefreshToken { get; set; }
-        public string GoogleTokenIssued { get; set; }
-
+        public StorageMethod StorageMethod { get; set; } = StorageMethod.Sftp;
+        
         public string SftpHost { get; set; }
         public ushort SftpPort { get; set; }
         public string SftpUsername { get; set; }
@@ -22,6 +11,8 @@
         public string SftpPrivateKey { get; set; }
         public string SftpBackupDirectoryPath { get; set; }
         public string SftpTrustedHost { get; set; }
+
+        public string FileSystemPath { get; set; } = @"backups";
 
         public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe";
         public string MySqlDumpPath { get; set; } = @"mysqldump";
