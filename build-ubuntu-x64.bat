@@ -1,1 +1,0 @@
-dotnet publish --self-contained -c Release -f netcoreapp2.1 -r ubuntu-x64 -p:CopyOutputSymbolsToPublishDirectory=false
