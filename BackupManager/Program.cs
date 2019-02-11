@@ -1,10 +1,6 @@
-﻿using Google.Apis.Auth.OAuth2;
-using Google.Apis.Drive.v3;
-using Google.Apis.Services;
-using Renci.SshNet;
+﻿using Renci.SshNet;
 using Renci.SshNet.Common;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -17,15 +13,12 @@ using System.Text;
 using System.Threading;
 using System.Xml;
 using System.Xml.Serialization;
-using GFile = Google.Apis.Drive.v3.Data.File;
 
 namespace BackupManager
 {
     public static class Program
     {
         public readonly static Stopwatch sw = new Stopwatch();
-
-        private const string FOLDER_MIME = @"application/vnd.google-apps.folder";
 
         private const string CONFIG_NAME = @"FlashiiBackupManager.v1.xml";
 
@@ -47,7 +40,6 @@ namespace BackupManager
             CONFIG_NAME
         );
 
-        private static DriveService DriveService;
         private static object BackupStorage;
 
         private static SftpClient SFTP;
@@ -113,22 +105,6 @@ namespace BackupManager
             
             switch (Config.StorageMethod)
             {
-                case StorageMethod.GoogleDrive:
-                    UserCredential uc = GoogleAuthenticate(
-                        new ClientSecrets
-                        {
-                            ClientId = Config.GoogleClientId,
-                            ClientSecret = Config.GoogleClientSecret,
-                        },
-                        new[] {
-                            DriveService.Scope.Drive,
-                            DriveService.Scope.DriveFile,
-                        }
-                    );
-
-                    CreateDriveService(uc);
-                    break;
-
                 case StorageMethod.Sftp:
                     if (string.IsNullOrWhiteSpace(Config.SftpHost) || string.IsNullOrWhiteSpace(Config.SftpUsername))
                     {
@@ -185,10 +161,6 @@ namespace BackupManager
 
                 switch (f)
                 {
-                    case GFile fgf:
-                        Log($@"MySQL dump uploaded: {fgf.Name} ({fgf.Id})");
-                        break;
-
                     default:
                         Log($@"MySQL dump uploaded.");
                         break;
@@ -216,10 +188,6 @@ namespace BackupManager
 
                     switch (f)
                     {
-                        case GFile fgf:
-                            Log($@"Misuzu data uploaded: {fgf.Name} ({fgf.Id})");
-                            break;
-
                         default:
                             Log($@"Misuzu data uploaded.");
                             break;
@@ -281,18 +249,6 @@ namespace BackupManager
 
             switch (BackupStorage)
             {
-                case GFile gfile:
-                    FilesResource.CreateMediaUpload request = DriveService.Files.Create(new GFile
-                    {
-                        Name = name,
-                        Parents = new List<string> {
-                            gfile.Id,
-                        },
-                    }, stream, type);
-                    request.Fields = @"id, name";
-                    request.Upload();
-                    return request.ResponseBody;
-
                 case string scpName:
                     SFTP.UploadFile(stream, scpName + @"/" + name);
                     break;
@@ -413,57 +369,10 @@ namespace BackupManager
             return output;
         }
         
-        public static UserCredential GoogleAuthenticate(ClientSecrets cs, string[] scopes)
-        {
-            Log(@"Authenticating with Google...");
-            return GoogleWebAuthorizationBroker.AuthorizeAsync(
-                cs,
-                scopes,
-                @"user",
-                CancellationToken.None,
-                new GoogleDatastore(Config),
-                new PromptCodeReceiver()
-            ).Result;
-        }
-
-        public static void CreateDriveService(UserCredential uc)
-        {
-            Log(@"Creating Google Drive service...");
-            DriveService = new DriveService(new BaseClientService.Initializer()
-            {
-                HttpClientInitializer = uc,
-                ApplicationName = @"Flashii Backup Manager",
-            });
-        }
-
         public static void GetBackupStorage(string name = null)
         {
             switch (Config.StorageMethod)
             {
-                case StorageMethod.GoogleDrive:
-                    name = name ?? Config.GoogleBackupDirectory;
-                    Log(@"Getting backup folder...");
-                    FilesResource.ListRequest lr = DriveService.Files.List();
-                    lr.Q = $@"name = '{name}' and mimeType = '{FOLDER_MIME}'";
-                    lr.PageSize = 1;
-                    lr.Fields = @"files(id)";
-                    GFile backupFolder = lr.Execute().Files.FirstOrDefault();
-
-                    if (backupFolder == null)
-                    {
-                        Log(@"Backup folder doesn't exist yet, creating it...");
-                        FilesResource.CreateRequest dcr = DriveService.Files.Create(new GFile
-                        {
-                            Name = name,
-                            MimeType = FOLDER_MIME,
-                        });
-                        dcr.Fields = @"id";
-                        backupFolder = dcr.Execute();
-                    }
-
-                    BackupStorage = backupFolder;
-                    break;
-
                 case StorageMethod.Sftp:
                     string directory = (BackupStorage = name ?? Config.SftpBackupDirectoryPath) as string;
                     try
