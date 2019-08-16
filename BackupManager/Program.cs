@@ -381,9 +381,6 @@ namespace BackupManager
 
         public static void SatoriBroadcast(string text, bool error = false)
         {
-#if DEBUG
-            return;
-#endif
             if (string.IsNullOrEmpty(text)
                 || Config == null
                 || string.IsNullOrWhiteSpace(Config.SatoriHost)
@@ -401,7 +398,8 @@ namespace BackupManager
             {
                 try
                 {
-                    ip = Dns.GetHostAddresses(Config.SatoriHost).FirstOrDefault();
+                    // forcing IPv4 here, it seems to explode with IPv6 and i don't really want to figure out why
+                    ip = Dns.GetHostAddresses(Config.SatoriHost).FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork);
                 }
                 catch
                 {
