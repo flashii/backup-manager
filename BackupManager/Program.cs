@@ -159,7 +159,9 @@ namespace BackupManager
 
             Log(@"Database backup...");
 
-            using (Stream s = CreateMySqlDump())
+            string sqldump = CreateMySqlDump();
+
+            using (Stream s = File.OpenRead(sqldump))
             using (Stream g = GZipEncodeStream(s))
             {
                 object f = Upload(DatabaseDumpName, @"application/sql+gzip", g);
@@ -171,6 +173,8 @@ namespace BackupManager
                         break;
                 }
             }
+
+            File.Delete(sqldump);
 
             if (Directory.Exists(Config.MisuzuPath))
             {
@@ -330,12 +334,12 @@ namespace BackupManager
             return tmpName;
         }
 
-        public static Stream CreateMySqlDump()
+        public static string CreateMySqlDump()
         {
             Log(@"Dumping MySQL Databases...");
-            string tmpFile = Path.GetTempFileName();
+            string sqldefaults = Path.GetTempFileName();
 
-            using (FileStream fs = File.Open(tmpFile, FileMode.Open, FileAccess.ReadWrite))
+            using (FileStream fs = File.Open(sqldefaults, FileMode.Open, FileAccess.ReadWrite))
             using (StreamWriter sw = new StreamWriter(fs))
             {
                 sw.WriteLine(@"[client]");
@@ -344,39 +348,35 @@ namespace BackupManager
                 sw.WriteLine(@"default-character-set=utf8mb4");
             }
 
-            // should we use --result-file ?
+            string sqldump = Path.GetTempFileName();
+
             StringBuilder mysqldumpArgs = new StringBuilder();
-            mysqldumpArgs.AppendFormat(@"--defaults-file={0} ", tmpFile);
+            mysqldumpArgs.AppendFormat(@"--defaults-file={0} ", sqldefaults);
             mysqldumpArgs.Append(@"--single-transaction ");
             mysqldumpArgs.Append(@"--tz-utc --triggers ");
             mysqldumpArgs.Append(@"--routines --hex-blob ");
             mysqldumpArgs.Append(@"--add-locks --order-by-primary ");
+            mysqldumpArgs.AppendFormat(@"--result-file={0} ", sqldump);
             mysqldumpArgs.Append(@"-l -Q -q -B "); // lock, quote names, quick, databases list
             mysqldumpArgs.Append(Config.MySqlDatabases);
+
+#if DEBUG
+            Log($@"mysqldump args: {mysqldumpArgs}");
+#endif
 
             Process p = Process.Start(new ProcessStartInfo
             {
                 FileName = IsWindows ? Config.MySqlDumpPathWindows : Config.MySqlDumpPath,
-                RedirectStandardError = false,
-                RedirectStandardInput = false,
-                RedirectStandardOutput = true,
                 Arguments = mysqldumpArgs.ToString(),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             });
 
-            int read;
-            byte[] buffer = new byte[1024];
-            MemoryStream ms = new MemoryStream();
-
-            while ((read = p.StandardOutput.BaseStream.Read(buffer, 0, buffer.Length)) > 0)
-                ms.Write(buffer, 0, read);
-
             p.WaitForExit();
-            File.Delete(tmpFile);
-            ms.Seek(0, SeekOrigin.Begin);
 
-            return ms;
+            File.Delete(sqldefaults);
+
+            return sqldump;
         }
 
         public static Stream GZipEncodeStream(Stream input)
@@ -414,6 +414,9 @@ namespace BackupManager
 
         public static void SatoriBroadcast(string text, bool error = false)
         {
+#if DEBUG
+            return;
+#endif
             if (string.IsNullOrEmpty(text)
                 || Config == null
                 || string.IsNullOrWhiteSpace(Config.SatoriHost)

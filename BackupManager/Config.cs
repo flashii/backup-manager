@@ -14,7 +14,7 @@
 
         public string FileSystemPath { get; set; } = @"backups";
 
-        public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe";
+        public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MariaDB 10.3\bin\mysqldump.exe";
         public string MySqlDumpPath { get; set; } = @"mysqldump";
         public string MySqlHost { get; set; } = @"localhost";
         public string MySqlUser { get; set; }
