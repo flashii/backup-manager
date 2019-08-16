@@ -2,16 +2,6 @@
 {
     public class Config
     {
-        public StorageMethod StorageMethod { get; set; } = StorageMethod.Sftp;
-        
-        public string SftpHost { get; set; }
-        public ushort SftpPort { get; set; }
-        public string SftpUsername { get; set; }
-        public string SftpPassphrase { get; set; }
-        public string SftpPrivateKey { get; set; }
-        public string SftpBackupDirectoryPath { get; set; }
-        public string SftpTrustedHost { get; set; }
-
         public string FileSystemPathV2 { get; set; }
 
         public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MariaDB 10.3\bin\mysqldump.exe";

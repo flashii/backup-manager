@@ -1,6 +1,4 @@
-﻿using Renci.SshNet;
-using Renci.SshNet.Common;
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -10,7 +8,6 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
 using System.Xml;
 using System.Xml.Serialization;
 
@@ -43,10 +40,6 @@ namespace BackupManager
         public static string FSPath => string.IsNullOrWhiteSpace(Config.FileSystemPathV2)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), @"Backups")
             : Config.FileSystemPathV2;
-
-        private static object BackupStorage;
-
-        private static SftpClient SFTP;
 
         public static bool Headless;
 
@@ -107,75 +100,18 @@ namespace BackupManager
 
             LoadConfig();
             
-            switch (Config.StorageMethod)
-            {
-                case StorageMethod.Sftp:
-                    if (string.IsNullOrWhiteSpace(Config.SftpHost) || string.IsNullOrWhiteSpace(Config.SftpUsername))
-                    {
-                        sw.Stop();
-                        Config.SftpHost = Config.SftpHost ?? @"";
-                        Config.SftpPort = Config.SftpPort < 1 ? (ushort)22 : Config.SftpPort;
-                        Config.SftpUsername = Config.SftpUsername ?? @"";
-                        Config.SftpPassphrase = Config.SftpPassphrase ?? @"";
-                        Config.SftpPrivateKey = Config.SftpPrivateKey ?? @"";
-                        Config.SftpTrustedHost = Config.SftpTrustedHost ?? @"";
-                        Config.SftpBackupDirectoryPath = Config.SftpBackupDirectoryPath ?? @"";
-                        SaveConfig();
-                        Error(@"No Sftp host/auth details found in the configuration.");
-                    }
-
-                    if (!string.IsNullOrEmpty(Config.SftpPrivateKey))
-                        SFTP = new SftpClient(Config.SftpHost, Config.SftpPort, Config.SftpUsername, new PrivateKeyFile(Config.SftpPrivateKey, Config.SftpPassphrase ?? string.Empty));
-                    else
-                        SFTP = new SftpClient(Config.SftpHost, Config.SftpPort, Config.SftpUsername, Config.SftpPassphrase ?? string.Empty);
-
-                    using (ManualResetEvent mre = new ManualResetEvent(false))
-                    {
-                        if (!string.IsNullOrWhiteSpace(Config.SftpTrustedHost))
-                            SFTP.HostKeyReceived += (s, e) =>
-                            {
-                                string checkString = e.HostKeyName + @"#" + Convert.ToBase64String(e.HostKey) + @"#" + Convert.ToBase64String(e.FingerPrint);
-                                e.CanTrust = Config.SftpTrustedHost.SequenceEqual(checkString);
-                                mre.Set();
-                            };
-                        else
-                            mre.Set();
-
-                        try
-                        {
-                            SFTP.Connect();
-                        } catch (SshConnectionException)
-                        {
-                            Error(@"Error during SFTP connect, it's possible the server key changed.");
-                        }
-
-                        mre.WaitOne();
-                    }
-                    break;
-
-                case StorageMethod.FileSystem:
-                    if (!Directory.Exists(FSPath))
-                        Directory.CreateDirectory(FSPath);
-                    break;
-            }
-
-            GetBackupStorage();
+            if (!Directory.Exists(FSPath))
+                Directory.CreateDirectory(FSPath);
 
             Log(@"Database backup...");
 
-            string sqldump = CreateMySqlDump();
+            string sqldump = CreateDbDump();
 
             using (Stream s = File.OpenRead(sqldump))
             using (Stream g = GZipEncodeStream(s))
             {
-                object f = Upload(DatabaseDumpName, @"application/sql+gzip", g);
-
-                switch (f)
-                {
-                    default:
-                        Log($@"MySQL dump uploaded.");
-                        break;
-                }
+                Upload(DatabaseDumpName, g);
+                Log($@"MariaDB dump saved.");
             }
 
             File.Delete(sqldump);
@@ -197,14 +133,8 @@ namespace BackupManager
 
                 using (FileStream fs = File.OpenRead(archivePath))
                 {
-                    object f = Upload(UserDataName, @"application/zip", fs);
-
-                    switch (f)
-                    {
-                        default:
-                            Log($@"Misuzu data uploaded.");
-                            break;
-                    }
+                    Upload(UserDataName, fs);
+                    Log($@"Misuzu data saved.");
                 }
 
                 File.Delete(archivePath);
@@ -256,25 +186,14 @@ namespace BackupManager
             Environment.Exit(exit);
         }
         
-        public static object Upload(string name, string type, Stream stream)
+        public static void Upload(string name, Stream stream)
         {
-            Log($@"Uploading '{name}'...");
+            Log($@"Saving '{name}'...");
 
-            switch (Config.StorageMethod)
-            {
-                case StorageMethod.Sftp:
-                    SFTP.UploadFile(stream, (BackupStorage as string) + @"/" + name);
-                    break;
+            string filename = Path.Combine(FSPath, name);
 
-                case StorageMethod.FileSystem:
-                    string filename = Path.Combine(BackupStorage as string, name);
-
-                    using (FileStream fs = File.OpenWrite(filename))
-                        stream.CopyTo(fs);
-                    break;
-            }
-
-            return null;
+            using (FileStream fs = File.OpenWrite(filename))
+                stream.CopyTo(fs);
         }
 
         public static string CreateMisuzuDataBackup(string configPath, string storePath)
@@ -301,9 +220,9 @@ namespace BackupManager
             return tmpName;
         }
 
-        public static string CreateMySqlDump()
+        public static string CreateDbDump()
         {
-            Log(@"Dumping MySQL Databases...");
+            Log(@"Dumping MariaDB Databases...");
             string sqldefaults = Path.GetTempFileName();
 
             using (FileStream fs = File.Open(sqldefaults, FileMode.Open, FileAccess.ReadWrite))
@@ -358,27 +277,6 @@ namespace BackupManager
             return output;
         }
         
-        public static void GetBackupStorage(string name = null)
-        {
-            switch (Config.StorageMethod)
-            {
-                case StorageMethod.Sftp:
-                    string directory = (BackupStorage = name ?? Config.SftpBackupDirectoryPath) as string;
-                    try
-                    {
-                        SFTP.ListDirectory(directory);
-                    } catch (SftpPathNotFoundException)
-                    {
-                        SFTP.CreateDirectory(directory);
-                    }
-                    break;
-
-                case StorageMethod.FileSystem:
-                    BackupStorage = name ?? FSPath;
-                    break;
-            }
-        }
-
         public static void SatoriBroadcast(string text, bool error = false)
         {
             if (string.IsNullOrEmpty(text)
