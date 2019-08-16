@@ -4,6 +4,6 @@
     {
         //GoogleDrive = 1,
         Sftp = 2,
-        FileSystem = 4, // for debugging mysqldump
+        FileSystem = 4,
     }
 }

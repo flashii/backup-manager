@@ -40,6 +40,10 @@ namespace BackupManager
             CONFIG_NAME
         );
 
+        public static string FSPath => string.IsNullOrWhiteSpace(Config.FileSystemPathV2)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), @"Backups")
+            : Config.FileSystemPathV2;
+
         private static object BackupStorage;
 
         private static SftpClient SFTP;
@@ -150,8 +154,8 @@ namespace BackupManager
                     break;
 
                 case StorageMethod.FileSystem:
-                    if (!Directory.Exists(Config.FileSystemPath))
-                        Directory.CreateDirectory(Config.FileSystemPath);
+                    if (!Directory.Exists(FSPath))
+                        Directory.CreateDirectory(FSPath);
                     break;
             }
 
@@ -179,12 +183,12 @@ namespace BackupManager
             if (Directory.Exists(Config.MisuzuPath))
             {
                 Log(@"Filesystem backup...");
-                string mszConfig = GetMisuzuConfig();
+                string mszConfig = Path.Combine(Config.MisuzuPath, @"config/config.ini");
 
                 if (!File.Exists(mszConfig))
                     Error(@"Could not find Misuzu config.");
 
-                string mszStore = FindMisuzuStorageDir(mszConfig);
+                string mszStore = Path.Combine(Config.MisuzuPath, @"store");
 
                 if (!Directory.Exists(mszStore))
                     Error(@"Could not find Misuzu storage directory.");
@@ -271,43 +275,6 @@ namespace BackupManager
             }
 
             return null;
-        }
-
-        public static string GetMisuzuConfig()
-        {
-            return Path.Combine(Config.MisuzuPath, @"config/config.ini");
-        }
-
-        public static string FindMisuzuStorageDir(string config)
-        {
-            Log(@"Finding storage directory...");
-
-            string[] configLines = File.ReadAllLines(config);
-            bool storageSectionFound = false;
-            string path = string.Empty;
-
-            foreach (string line in configLines)
-            {
-                if (!string.IsNullOrEmpty(path))
-                    break;
-                if (line.StartsWith('['))
-                    storageSectionFound = line == @"[Storage]";
-                if (!storageSectionFound)
-                    continue;
-
-                string[] split = line.Split('=', StringSplitOptions.RemoveEmptyEntries);
-
-                if (split.Length < 2 || split[0] != @"path")
-                    continue;
-
-                path = string.Join('=', split.Skip(1));
-                break;
-            }
-
-            if (string.IsNullOrEmpty(path))
-                path = Path.Combine(Config.MisuzuPath, @"store");
-
-            return path;
         }
 
         public static string CreateMisuzuDataBackup(string configPath, string storePath)
@@ -407,7 +374,7 @@ namespace BackupManager
                     break;
 
                 case StorageMethod.FileSystem:
-                    BackupStorage = name ?? Config.FileSystemPath;
+                    BackupStorage = name ?? FSPath;
                     break;
             }
         }

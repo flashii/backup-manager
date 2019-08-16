@@ -12,7 +12,7 @@
         public string SftpBackupDirectoryPath { get; set; }
         public string SftpTrustedHost { get; set; }
 
-        public string FileSystemPath { get; set; } = @"backups";
+        public string FileSystemPathV2 { get; set; }
 
         public string MySqlDumpPathWindows { get; set; } = @"C:\Program Files\MariaDB 10.3\bin\mysqldump.exe";
         public string MySqlDumpPath { get; set; } = @"mysqldump";
