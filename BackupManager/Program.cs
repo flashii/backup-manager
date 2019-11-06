@@ -11,10 +11,8 @@ using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
 
-namespace BackupManager
-{
-    public static class Program
-    {
+namespace BackupManager {
+    public static class Program {
         public readonly static Stopwatch sw = new Stopwatch();
 
         private const string CONFIG_NAME = @"FlashiiBackupManager.v1.xml";
@@ -26,9 +24,7 @@ namespace BackupManager
 
         public static string Basename
             => $@"{Environment.MachineName} {Startup.Year:0000}-{Startup.Month:00}-{Startup.Day:00} {Startup.Hour:00}{Startup.Minute:00}{Startup.Second:00}";
-        public static string DatabaseDumpName
-            => $@"{Basename}.sql.gz";
-        public static string UserDataName
+        public static string BackupName
             => $@"{Basename}.zip";
 
         private static Config Config;
@@ -37,19 +33,17 @@ namespace BackupManager
             CONFIG_NAME
         );
 
-        public static string FSPath => string.IsNullOrWhiteSpace(Config.FileSystemPathV2)
+        public static string BackupStore => string.IsNullOrWhiteSpace(Config.FileSystemPathV2)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), @"Backups")
             : Config.FileSystemPathV2;
 
         public static bool Headless;
 
-        public static string WindowsToUnixPath(this string path)
-        {
+        public static string WindowsToUnixPath(this string path) {
             return IsWindows ? path.Replace('\\', '/') : path;
         }
 
-        public static Stream ToXml(this object obj, bool pretty = false)
-        {
+        public static Stream ToXml(this object obj, bool pretty = false) {
             MemoryStream ms = new MemoryStream();
             XmlSerializer xs = new XmlSerializer(obj.GetType());
 
@@ -60,8 +54,7 @@ namespace BackupManager
             return ms;
         }
 
-        public static T FromXml<T>(Stream xml)
-        {
+        public static T FromXml<T>(Stream xml) {
             if (xml.CanSeek)
                 xml.Seek(0, SeekOrigin.Begin);
 
@@ -69,76 +62,81 @@ namespace BackupManager
             return (T)xs.Deserialize(xml);
         }
 
-        public static void SaveConfig()
-        {
+        public static void SaveConfig() {
             Log(@"Saving configuration...");
             using (FileStream fs = new FileStream(ConfigPath, FileMode.Create, FileAccess.Write))
             using (Stream cs = Config.ToXml(true))
                 cs.CopyTo(fs);
         }
 
-        public static void LoadConfig()
-        {
+        public static void LoadConfig() {
             Log(@"Loading configuration...");
             using (FileStream fs = File.OpenRead(ConfigPath))
                 Config = FromXml<Config>(fs);
         }
 
-        public static void Main(string[] args)
-        {
+        public static void Main(string[] args) {
             Headless = args.Contains(@"-cron") || args.Contains(@"-headless");
 
             Log(@"Flashii Backup Manager");
             sw.Start();
 
-            if (!File.Exists(ConfigPath))
-            {
+            if (!File.Exists(ConfigPath)) {
                 Config = new Config();
                 SaveConfig();
                 Error(@"No configuration file exists, created a blank one. Be sure to fill it out properly.");
             }
 
             LoadConfig();
-            
-            if (!Directory.Exists(FSPath))
-                Directory.CreateDirectory(FSPath);
 
-            Log(@"Database backup...");
+            if (!Directory.Exists(BackupStore))
+                Directory.CreateDirectory(BackupStore);
 
-            string sqldump = CreateDbDump();
+            Log(@"Creating backup archive...");
 
-            using (Stream s = File.OpenRead(sqldump))
-            using (Stream g = GZipEncodeStream(s))
-            {
-                Upload(DatabaseDumpName, g);
-                Log($@"MariaDB dump saved.");
-            }
+            string archivePath = Path.GetTempFileName();
 
-            File.Delete(sqldump);
+            using (FileStream fs = File.OpenWrite(archivePath))
+            using (ZipArchive archive = new ZipArchive(fs, ZipArchiveMode.Create)) {
+                Log(@"Database backup...");
 
-            if (Directory.Exists(Config.MisuzuPath))
-            {
-                Log(@"Filesystem backup...");
-                string mszConfig = Path.Combine(Config.MisuzuPath, @"config/config.ini");
+                string sqldefaults = Path.GetTempFileName();
 
-                if (!File.Exists(mszConfig))
-                    Error(@"Could not find Misuzu config.");
-
-                string mszStore = Path.Combine(Config.MisuzuPath, @"store");
-
-                if (!Directory.Exists(mszStore))
-                    Error(@"Could not find Misuzu storage directory.");
-
-                string archivePath = CreateMisuzuDataBackup(mszConfig, mszStore);
-
-                using (FileStream fs = File.OpenRead(archivePath))
-                {
-                    Upload(UserDataName, fs);
-                    Log($@"Misuzu data saved.");
+                using (FileStream sqlConfFs = File.Open(sqldefaults, FileMode.Open, FileAccess.ReadWrite))
+                using (StreamWriter sw = new StreamWriter(sqlConfFs)) {
+                    sw.WriteLine(@"[client]");
+                    sw.WriteLine($@"user={Config.MySqlUser}");
+                    sw.WriteLine($@"password={Config.MySqlPass}");
+                    sw.WriteLine(@"default-character-set=utf8mb4");
                 }
 
-                File.Delete(archivePath);
+                string[] databases = Config.MySqlDatabases.Split(' ');
+
+                foreach (string database in databases)
+                    CreateDbDump(archive, sqldefaults, database);
+
+                Log($@"MariaDB dump done.");
+                File.Delete(sqldefaults);
+
+                if (Directory.Exists(Config.MisuzuPath)) {
+                    Log(@"Filesystem backup...");
+                    string mszConfig = Path.Combine(Config.MisuzuPath, @"config/config.ini");
+
+                    if (!File.Exists(mszConfig))
+                        Error(@"Could not find Misuzu config.");
+
+                    string mszStore = Path.Combine(Config.MisuzuPath, @"store");
+
+                    if (!Directory.Exists(mszStore))
+                        Error(@"Could not find Misuzu storage directory.");
+
+                    CreateMisuzuDataBackup(archive, mszConfig, mszStore);
+                }
             }
+
+            string targetPath = Path.Combine(BackupStore, BackupName);
+            File.Move(archivePath, targetPath);
+            Log($@"Moved backup archive to {targetPath}");
 
             SaveConfig();
             sw.Stop();
@@ -149,12 +147,9 @@ namespace BackupManager
 #endif
         }
 
-        public static void Log(object line, bool forceSatori = false)
-        {
-            if (!Headless)
-            {
-                if (sw?.IsRunning == true)
-                {
+        public static void Log(object line, bool forceSatori = false) {
+            if (!Headless) {
+                if (sw?.IsRunning == true) {
                     ConsoleColor fg = Console.ForegroundColor;
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.Write(sw.ElapsedMilliseconds.ToString().PadRight(10));
@@ -168,10 +163,8 @@ namespace BackupManager
                 SatoriBroadcast(line.ToString());
         }
 
-        public static void Error(object line, int exit = 0x00DEAD00)
-        {
-            if (!Headless)
-            {
+        public static void Error(object line, int exit = 0x00DEAD00) {
+            if (!Headless) {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Log(line);
                 Console.ResetColor();
@@ -185,73 +178,42 @@ namespace BackupManager
 
             Environment.Exit(exit);
         }
-        
-        public static void Upload(string name, Stream stream)
-        {
-            Log($@"Saving '{name}'...");
 
-            string filename = Path.Combine(FSPath, name);
+        public static void CreateMisuzuDataBackup(ZipArchive archive, string configPath, string storePath) {
+            Log(@"Storing non-volatile Misuzu data...");
 
-            using (FileStream fs = File.OpenWrite(filename))
-                stream.CopyTo(fs);
+            archive.CreateEntryFromFile(configPath, @"misuzu/config/config.ini", CompressionLevel.Optimal);
+
+            string[] storeFiles = Directory.GetFiles(storePath, @"*", SearchOption.AllDirectories);
+
+            foreach (string file in storeFiles)
+                archive.CreateEntryFromFile(
+                    file,
+                    @"misuzu/store/" + file.Replace(storePath, string.Empty).WindowsToUnixPath().Trim('/'),
+                    CompressionLevel.Optimal
+                );
         }
 
-        public static string CreateMisuzuDataBackup(string configPath, string storePath)
-        {
-            Log(@"Creating Zip archive containing non-volatile Misuzu data...");
-
-            string tmpName = Path.GetTempFileName();
-
-            using (FileStream fs = File.OpenWrite(tmpName))
-            using (ZipArchive za = new ZipArchive(fs, ZipArchiveMode.Create))
-            {
-                za.CreateEntryFromFile(configPath, @"config/config.ini", CompressionLevel.Optimal);
-
-                string[] storeFiles = Directory.GetFiles(storePath, @"*", SearchOption.AllDirectories);
-
-                foreach (string file in storeFiles)
-                    za.CreateEntryFromFile(
-                        file,
-                        @"store/" + file.Replace(storePath, string.Empty).WindowsToUnixPath().Trim('/'),
-                        CompressionLevel.Optimal
-                    );
-            }
-
-            return tmpName;
-        }
-
-        public static string CreateDbDump()
-        {
-            Log(@"Dumping MariaDB Databases...");
-            string sqldefaults = Path.GetTempFileName();
-
-            using (FileStream fs = File.Open(sqldefaults, FileMode.Open, FileAccess.ReadWrite))
-            using (StreamWriter sw = new StreamWriter(fs))
-            {
-                sw.WriteLine(@"[client]");
-                sw.WriteLine($@"user={Config.MySqlUser}");
-                sw.WriteLine($@"password={Config.MySqlPass}");
-                sw.WriteLine(@"default-character-set=utf8mb4");
-            }
+        public static void CreateDbDump(ZipArchive archive, string defaults, string database) {
+            Log($@"Dumping {database}...");
 
             string sqldump = Path.GetTempFileName();
 
             StringBuilder mysqldumpArgs = new StringBuilder();
-            mysqldumpArgs.AppendFormat(@"--defaults-file={0} ", sqldefaults);
+            mysqldumpArgs.AppendFormat(@"--defaults-file={0} ", defaults);
             mysqldumpArgs.Append(@"--single-transaction ");
             mysqldumpArgs.Append(@"--tz-utc --triggers ");
             mysqldumpArgs.Append(@"--routines --hex-blob ");
             mysqldumpArgs.Append(@"--add-locks --order-by-primary ");
             mysqldumpArgs.AppendFormat(@"--result-file={0} ", sqldump);
-            mysqldumpArgs.Append(@"-l -Q -q -B "); // lock, quote names, quick, databases list
-            mysqldumpArgs.Append(Config.MySqlDatabases);
+            mysqldumpArgs.Append(@"-l -Q -q -B "); // lock, quote names, quick, database list
+            mysqldumpArgs.Append(database);
 
 #if DEBUG
             Log($@"mysqldump args: {mysqldumpArgs}");
 #endif
 
-            Process p = Process.Start(new ProcessStartInfo
-            {
+            Process p = Process.Start(new ProcessStartInfo {
                 FileName = IsWindows ? Config.MySqlDumpPathWindows : Config.MySqlDumpPath,
                 Arguments = mysqldumpArgs.ToString(),
                 UseShellExecute = false,
@@ -260,25 +222,12 @@ namespace BackupManager
 
             p.WaitForExit();
 
-            File.Delete(sqldefaults);
+            archive.CreateEntryFromFile(sqldump, $@"mariadb/{database}.sql", CompressionLevel.Optimal);
 
-            return sqldump;
+            File.Delete(sqldump);
         }
 
-        public static Stream GZipEncodeStream(Stream input)
-        {
-            Log(@"Compressing stream...");
-            MemoryStream output = new MemoryStream();
-
-            using (GZipStream gz = new GZipStream(output, CompressionLevel.Optimal, true))
-                input.CopyTo(gz);
-
-            output.Seek(0, SeekOrigin.Begin);
-            return output;
-        }
-        
-        public static void SatoriBroadcast(string text, bool error = false)
-        {
+        public static void SatoriBroadcast(string text, bool error = false) {
             if (string.IsNullOrEmpty(text)
                 || Config == null
                 || string.IsNullOrWhiteSpace(Config.SatoriHost)
@@ -288,19 +237,13 @@ namespace BackupManager
 
             IPAddress ip = null;
 
-            try
-            {
+            try {
                 ip = IPAddress.Parse(Config.SatoriHost);
-            }
-            catch
-            {
-                try
-                {
+            } catch {
+                try {
                     // forcing IPv4 here, it seems to explode with IPv6 and i don't really want to figure out why
                     ip = Dns.GetHostAddresses(Config.SatoriHost).FirstOrDefault(x => x.AddressFamily == AddressFamily.InterNetwork);
-                }
-                catch
-                {
+                } catch {
                     ip = null;
                 }
             }
@@ -325,8 +268,7 @@ namespace BackupManager
 
             StringBuilder messageBuilder = new StringBuilder();
 
-            using (HMACSHA256 hmac = new HMACSHA256(Encoding.UTF8.GetBytes(Config.SatoriSecret)))
-            {
+            using (HMACSHA256 hmac = new HMACSHA256(Encoding.UTF8.GetBytes(Config.SatoriSecret))) {
                 byte[] hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(text));
 
                 foreach (byte b in hash)
@@ -339,8 +281,7 @@ namespace BackupManager
             messageBytes[0] = messageBytes[messageBytes.Length - 1] = 0x0F;
             Encoding.UTF8.GetBytes(message).CopyTo(messageBytes, 1);
 
-            using (Socket sock = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp))
-            {
+            using (Socket sock = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp)) {
                 sock.NoDelay = sock.Blocking = true;
                 sock.Connect(endPoint);
                 sock.Send(messageBytes);
