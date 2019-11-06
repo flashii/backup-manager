@@ -9,7 +9,7 @@
         public string MySqlHost { get; set; } = @"localhost";
         public string MySqlUser { get; set; }
         public string MySqlPass { get; set; }
-        public string MySqlDatabases { get; set; } = @"misuzu";
+        public string MySqlExcludeDatabases { get; set; } = @"mysql information_schema performance_schema";
 
         public string MisuzuPath { get; set; }
 

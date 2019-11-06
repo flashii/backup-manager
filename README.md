@@ -6,5 +6,5 @@ Provided for transparency.
 ## Grant line for MySQL backup user
 
 ```
-GRANT SELECT, LOCK TABLES, SHOW VIEW, EVENT, TRIGGER, EXECUTE  ON *.* TO 'user'@'localhost';
+GRANT SELECT, LOCK TABLES, SHOW VIEW, SHOW DATABASES, EVENT, TRIGGER, EXECUTE  ON *.* TO 'user'@'localhost';
 ```

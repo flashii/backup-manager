@@ -1,4 +1,6 @@
-﻿using System;
+﻿using MySql.Data.MySqlClient;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -92,6 +94,34 @@ namespace BackupManager {
             if (!Directory.Exists(BackupStore))
                 Directory.CreateDirectory(BackupStore);
 
+            Log(@"Fetching database list...");
+
+            MySqlConnectionStringBuilder connStr = new MySqlConnectionStringBuilder {
+                Server = Config.MySqlHost,
+                UserID = Config.MySqlUser,
+                Password = Config.MySqlPass,
+                CharacterSet = @"utf8mb4",
+            };
+
+            List<string> databases = new List<string>();
+            string[] exclude = Config.MySqlExcludeDatabases.Split(' ');
+
+            using (MySqlConnection conn = new MySqlConnection(connStr.ToString())) {
+                conn.Open();
+
+                using (MySqlCommand comm = new MySqlCommand(@"SHOW DATABASES;", conn))
+                using (MySqlDataReader read = comm.ExecuteReader()) {
+                    while (read.Read()) {
+                        string database = read.GetString(0);
+
+                        if (string.IsNullOrEmpty(database) || exclude.Contains(database))
+                            continue;
+
+                        databases.Add(database);
+                    }
+                }
+            }
+
             Log(@"Creating backup archive...");
 
             string archivePath = Path.GetTempFileName();
@@ -109,8 +139,6 @@ namespace BackupManager {
                     sw.WriteLine($@"password={Config.MySqlPass}");
                     sw.WriteLine(@"default-character-set=utf8mb4");
                 }
-
-                string[] databases = Config.MySqlDatabases.Split(' ');
 
                 foreach (string database in databases)
                     CreateDbDump(archive, sqldefaults, database);
