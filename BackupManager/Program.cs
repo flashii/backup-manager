@@ -233,8 +233,9 @@ namespace BackupManager {
             mysqldumpArgs.Append(@"--tz-utc --triggers ");
             mysqldumpArgs.Append(@"--routines --hex-blob ");
             mysqldumpArgs.Append(@"--add-locks --order-by-primary ");
+            mysqldumpArgs.Append(@"--skip-lock-tables "); // might regret this, we'll find out someday
             mysqldumpArgs.AppendFormat(@"--result-file={0} ", sqldump);
-            mysqldumpArgs.Append(@"-l -Q -q -B "); // lock, quote names, quick, database list
+            mysqldumpArgs.Append(@"-Q -q -B "); // lock, quote names, quick, database list
             mysqldumpArgs.Append(database);
 
 #if DEBUG
